@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: banking-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-banking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-banking_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-banking}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-banking} -d ${POSTGRES_DB:-banking}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: banking-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-banking}:${POSTGRES_PASSWORD:-banking_dev_password}@postgres:5432/${POSTGRES_DB:-banking}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-in-env-refresh}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      # Mount source for local dev hot-reload. Remove/comment in prod.
+      - ./backend:/code:ro
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build: ./frontend
+    container_name: banking-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      # Frontend Dockerfile serves production build via nginx on :80.
+      - "${FRONTEND_PORT:-3000}:80"
+    environment:
+      # Build-time only for Vite (baked into dist/). Set in .env / compose build args.
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+
+volumes:
+  pgdata:
